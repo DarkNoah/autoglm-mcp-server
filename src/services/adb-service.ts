@@ -5,11 +5,20 @@
  * Based on the Open-AutoGLM Python implementation.
  */
 
-import { spawn, exec } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { APP_PACKAGES } from '../config/apps.js';
-
+import { ACTION_TYPES, ActionType } from '../constants.js'
 const execAsync = promisify(exec);
+
+/**
+ * Action execution result
+ */
+export interface ActionResult {
+  success: boolean;
+  shouldFinish?: boolean;
+  message?: string;
+}
 
 /**
  * Device information
@@ -290,9 +299,238 @@ export class ADBService {
     screenHeight: number
   ): { x: number; y: number } {
     return {
-      x: Math.floor((relativeX / 1000) * screenWidth),
-      y: Math.floor((relativeY / 1000) * screenHeight)
+      x: Math.round((relativeX / 1000) * screenWidth),
+      y: Math.round((relativeY / 1000) * screenHeight)
     };
+  }
+
+  /**
+   * Execute an AutoGLM action
+   */
+  async executeAction(action: any, deviceId: string | undefined, width: number, height: number): Promise<ActionResult> {
+    const actionType = action["_metadata"];
+
+    // Handle finish action
+    if (actionType === "finish") {
+      return { success: true, shouldFinish: true, message: action["message"] };
+    }
+
+    // Unknown action type
+    if (actionType !== "do") {
+      return { success: false, shouldFinish: true, message: `Unknown action type: ${actionType}` };
+    }
+
+    const actionName = action.action;
+
+    try {
+      switch (actionName) {
+        case 'Launch':
+          return await this.handleLaunch(action, deviceId);
+        case 'Tap':
+          return await this.handleTap(action, deviceId, width, height);
+        case 'Type':
+        case 'Type_Name':
+          return await this.handleType(action, deviceId);
+        case 'Swipe':
+          return await this.handleSwipe(action, deviceId, width, height);
+        case 'Back':
+          return await this.handleBack(deviceId);
+        case 'Home':
+          return await this.handleHome(deviceId);
+        case 'Double Tap':
+          return await this.handleDoubleTap(action, deviceId, width, height);
+        case 'Long Press':
+          return await this.handleLongPress(action, deviceId, width, height);
+        case 'Wait':
+          return await this.handleWait(action);
+        case 'Take_over':
+          return this.handleTakeover(action);
+        case 'Note':
+          return this.handleNote(action);
+        case 'Call_API':
+          return this.handleCallApi(action);
+        case 'Interact':
+          return this.handleInteract();
+        default:
+          return { success: false, message: `Unknown action: ${actionName}` };
+      }
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Handle app launch action
+   */
+  private async handleLaunch(action: any, deviceId?: string): Promise<ActionResult> {
+    const appName = action["app"];
+    if (!appName) {
+      return { success: false, shouldFinish: false, message: "No app name specified" };
+    }
+
+    const packageName = APP_PACKAGES[appName as keyof typeof APP_PACKAGES];
+    if (!packageName) {
+      return { success: false, shouldFinish: false, message: `App not found: ${appName}` };
+    }
+
+    await this.launchApp(packageName, deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle tap action
+   */
+  private async handleTap(action: any, deviceId: string | undefined, width: number, height: number): Promise<ActionResult> {
+    const element = action["element"];
+    if (!element || !Array.isArray(element) || element.length < 2) {
+      return { success: false, shouldFinish: false, message: "No element coordinates" };
+    }
+
+    const { x, y } = this.relativeToAbsolute(element[0], element[1], width, height);
+
+    if ("message" in action) {
+      console.log(`Sensitive operation: ${action.message}`);
+    }
+
+    await this.tap(x, y, deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle text input action
+   */
+  private async handleType(action: any, deviceId?: string): Promise<ActionResult> {
+    const text = action["text"] || "";
+
+    // Get current IME
+    const currentIme = await this.execCommand(['shell', 'settings', 'get', 'secure', 'default_input_method'], deviceId);
+
+    // Switch to ADB Keyboard if needed
+    if (!currentIme.includes("com.android.adbkeyboard/.AdbIME")) {
+      await this.execCommand(['shell', 'ime', 'set', 'com.android.adbkeyboard/.AdbIME'], deviceId);
+    }
+
+    await this.sleep(100);
+    await this.clearText(deviceId);
+    await this.sleep(100);
+    await this.typeText(text, deviceId);
+    await this.sleep(100);
+
+    // Restore original IME
+    await this.execCommand(['shell', 'ime', 'set', currentIme.trim()], deviceId);
+    await this.sleep(100);
+
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle swipe action
+   */
+  private async handleSwipe(action: any, deviceId: string | undefined, width: number, height: number): Promise<ActionResult> {
+    const start = action["start"];
+    const end = action["end"];
+
+    if (!start || !end || !Array.isArray(start) || !Array.isArray(end) || start.length < 2 || end.length < 2) {
+      return { success: false, shouldFinish: false, message: "Missing swipe coordinates" };
+    }
+
+    const startCoords = this.relativeToAbsolute(start[0], start[1], width, height);
+    const endCoords = this.relativeToAbsolute(end[0], end[1], width, height);
+
+    await this.swipe(startCoords.x, startCoords.y, endCoords.x, endCoords.y, undefined, deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle back button action
+   */
+  private async handleBack(deviceId?: string): Promise<ActionResult> {
+    await this.back(deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle home button action
+   */
+  private async handleHome(deviceId?: string): Promise<ActionResult> {
+    await this.home(deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle double tap action
+   */
+  private async handleDoubleTap(action: any, deviceId: string | undefined, width: number, height: number): Promise<ActionResult> {
+    const element = action["element"];
+    if (!element || !Array.isArray(element) || element.length < 2) {
+      return { success: false, shouldFinish: false, message: "No element coordinates" };
+    }
+
+    const { x, y } = this.relativeToAbsolute(element[0], element[1], width, height);
+    await this.doubleTap(x, y, deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle long press action
+   */
+  private async handleLongPress(action: any, deviceId: string | undefined, width: number, height: number): Promise<ActionResult> {
+    const element = action["element"];
+    if (!element || !Array.isArray(element) || element.length < 2) {
+      return { success: false, shouldFinish: false, message: "No element coordinates" };
+    }
+
+    const { x, y } = this.relativeToAbsolute(element[0], element[1], width, height);
+    await this.longPress(x, y, 500, deviceId);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle wait action
+   */
+  private async handleWait(action: any): Promise<ActionResult> {
+    const durationStr = action["duration"] || "1 seconds";
+    let duration = 1.0;
+
+    try {
+      duration = parseFloat(durationStr.replace("seconds", "").replace("second", "").trim());
+      if (isNaN(duration)) duration = 1.0;
+    } catch {
+      duration = 1.0;
+    }
+
+    await this.sleep(duration * 1000);
+    return { success: true, shouldFinish: false };
+  }
+
+  /**
+   * Handle takeover request
+   */
+  private handleTakeover(action: any): ActionResult {
+    const message = action["message"] || "User intervention required";
+    console.log(`Takeover: ${message}`);
+    return { success: true, shouldFinish: false, message };
+  }
+
+  /**
+   * Handle note action
+   */
+  private handleNote(action: any): ActionResult {
+    return { success: true, shouldFinish: false, message: action.message };
+  }
+
+  /**
+   * Handle API call action
+   */
+  private handleCallApi(action: any): ActionResult {
+    return { success: true, shouldFinish: false, message: action.instruction };
+  }
+
+  /**
+   * Handle interaction request
+   */
+  private handleInteract(): ActionResult {
+    return { success: true, shouldFinish: false, message: "User interaction required" };
   }
 }
 

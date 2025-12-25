@@ -11,7 +11,6 @@ import { writeFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { ADBService } from './adb-service.js';
-import { APP_PACKAGES } from '../config/apps.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -71,6 +70,7 @@ export class AutoGLMAPIClient {
       lang: config.lang || (process.env.AUTOGLM_LANG as 'cn' | 'en') || 'cn',
     };
   }
+
 
   /**
    * Get the system prompt for AutoGLM
@@ -211,6 +211,7 @@ REMEMBER:
     }
   }
 
+
   /**
    * Parse AutoGLM response
    */
@@ -306,7 +307,7 @@ REMEMBER:
     let stepCount = 0;
     let finished = false;
 
-    const adbService = new ADBService()
+    const adbService = new ADBService();
 
     while (stepCount < this.config.maxSteps && !finished) {
       stepCount++;
@@ -316,10 +317,7 @@ REMEMBER:
       try {
         // Capture screenshot
         const screenshot = await this.captureScreenshot(deviceId);
-        const { width, height, base64_data } = screenshot
-
-        // Save screenshot to tmp directory
-        // await this.saveScreenshot(base64_data, stepCount);
+        const { width, height, base64_data } = screenshot;
 
         const currentApp = await adbService.getCurrentApp(deviceId);
 
@@ -354,21 +352,18 @@ REMEMBER:
         // Parse action
         const action = this.parseAction(parsed.action);
 
-
         const lastMessage = context[context.length - 1];
         lastMessage.content = (lastMessage.content as {
           type: string;
           text?: string | undefined;
-          image_url?: {
-            url: string;
-          } | undefined;
+          image_url?: { url: string } | undefined;
         }[]).find(x => x.type == 'text')?.text as string;
-        context[context.length - 1] = lastMessage
+        context[context.length - 1] = lastMessage;
 
+        // Execute action via ADBService
+        const actionResult = await adbService.executeAction(action, deviceId, width, height);
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
 
-        // Execute action
-        const actionResult = await this.executeAction(action, deviceId, width, height);
-        await new Promise((resolve, reject) => { setTimeout(resolve, 2000) });
         // Record step
         const stepRecord = {
           step: stepCount,
@@ -390,8 +385,9 @@ REMEMBER:
           role: 'assistant',
           content: `<answer>${parsed.thinking}\n\n${parsed.action}</answer>`,
         });
-        console.log('thinking:' + parsed.thinking)
-        console.log('action:' + parsed.action)
+        console.log('thinking:' + parsed.thinking);
+        console.log('action:' + parsed.action);
+
         // Check if finished
         if (action._metadata === 'finish' || actionResult.shouldFinish) {
           finished = true;
@@ -411,6 +407,7 @@ REMEMBER:
 
     return result;
   }
+
 
   /**
    * Save screenshot to tmp directory
@@ -436,32 +433,40 @@ REMEMBER:
 
   /**
    * Capture screenshot using ADB
-   * Based on Python screenshot.py: get_screenshot
    */
   private async captureScreenshot(deviceId?: string): Promise<{ base64_data: string; width: number; height: number }> {
-    const adbPrefix = deviceId ? ['-s', deviceId] : [];
-    const tempPath = `/tmp/screenshot_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+    const adbPrefix = deviceId ? `-s ${deviceId}` : '';
+    const os = await import('os');
+    const fs = await import('fs/promises');
+
+    // Use system temp directory for local temp file
+    const localTempPath = join(os.tmpdir(), `screenshot_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
+    // Use unique temp path on device to avoid conflicts
+    const deviceTempPath = `/sdcard/tmp_screenshot_${Date.now()}.png`;
+
+    // Cleanup helper function
+    const cleanup = async () => {
+      // Delete local temp file
+      await fs.unlink(localTempPath).catch(() => { });
+      // Delete device temp file
+      await execAsync(`adb ${adbPrefix} shell rm -f ${deviceTempPath}`).catch(() => { });
+    };
 
     try {
       // Execute screenshot command to save to device
-      await execAsync(`adb ${adbPrefix.join(' ')} shell screencap -p /sdcard/tmp.png`);
+      await execAsync(`adb ${adbPrefix} shell screencap -p ${deviceTempPath}`);
 
       // Pull screenshot to local temp path
-      await execAsync(`adb ${adbPrefix.join(' ')} pull /sdcard/tmp.png ${tempPath}`);
+      await execAsync(`adb ${adbPrefix} pull ${deviceTempPath} ${localTempPath}`);
 
       // Read the file and convert to base64
-      const fs = await import('fs/promises');
-      const imageBuffer = await fs.readFile(tempPath);
+      const imageBuffer = await fs.readFile(localTempPath);
 
       // Get image dimensions by parsing PNG header
-      // PNG dimensions are stored at bytes 16-24 (big-endian)
       let width = 1080;
       let height = 2400;
 
       if (imageBuffer.length >= 24) {
-        // PNG signature: 89 50 4E 47 0D 0A 1A 0A
-        // IHDR chunk starts at byte 8
-        // Width at bytes 16-19, Height at bytes 20-23
         width = imageBuffer.readUInt32BE(16);
         height = imageBuffer.readUInt32BE(20);
       }
@@ -469,21 +474,20 @@ REMEMBER:
       // Convert to base64
       const base64_data = imageBuffer.toString('base64');
 
-      // Cleanup temp file
-      await fs.unlink(tempPath).catch(() => { });
+      // Cleanup temp files (both local and device)
+      await cleanup();
 
-      return {
-        base64_data,
-        width,
-        height,
-      };
+      return { base64_data, width, height };
     } catch (error) {
+      // Always cleanup on error
+      await cleanup();
+
       console.error(`Screenshot error: ${error instanceof Error ? error.message : String(error)}`);
 
       // Create fallback black screenshot
       const defaultWidth = 1080;
       const defaultHeight = 2400;
-      const blackBuffer = Buffer.alloc(defaultWidth * defaultHeight * 3); // RGB
+      const blackBuffer = Buffer.alloc(defaultWidth * defaultHeight * 3);
       blackBuffer.fill(0);
 
       return {
@@ -493,20 +497,6 @@ REMEMBER:
       };
     }
   }
-
-  /**
-   * Get current app using ADB
-   */
-  // private async getCurrentApp(deviceId?: string): Promise<string> {
-  //   const adbPrefix = deviceId ? ['-s', deviceId] : [];
-  //   try {
-  //     const { stdout } = await execAsync(`adb ${adbPrefix.join(' ')} shell dumpsys window | grep mCurrentFocus`);
-  //     const match = stdout.match(/mCurrentFocus=Window\\{[^}]* ([^\\s]+)/);
-  //     return match ? match[1] : 'Unknown';
-  //   } catch {
-  //     return 'Unknown';
-  //   }
-  // }
 
   /**
    * Build screen info string
@@ -521,7 +511,6 @@ REMEMBER:
 
   /**
    * Parse action string to object
-   * Based on Python implementation with safe parsing
    */
   private parseAction(actionStr: string): any {
     try {
@@ -554,7 +543,6 @@ REMEMBER:
         const action: any = { _metadata: 'do' };
 
         // Parse keyword arguments using regex
-        // Match patterns like: key="value", key='value', key=[1,2], key=123
         const keyValuePattern = /(\w+)\s*=\s*(?:"([^"]*?)"|'([^']*?)'|\[([^\]]*)\]|(\d+(?:\.\d+)?))/g;
         let match;
 
@@ -563,13 +551,10 @@ REMEMBER:
           let value: any;
 
           if (match[2] !== undefined) {
-            // Double-quoted string
             value = match[2];
           } else if (match[3] !== undefined) {
-            // Single-quoted string
             value = match[3];
           } else if (match[4] !== undefined) {
-            // Array like [x, y]
             try {
               value = JSON.parse(`[${match[4]}]`);
             } catch {
@@ -580,7 +565,6 @@ REMEMBER:
               });
             }
           } else if (match[5] !== undefined) {
-            // Number
             value = parseFloat(match[5]);
           }
 
@@ -592,325 +576,17 @@ REMEMBER:
 
       // Handle finish() action
       if (response.startsWith('finish(') || response.startsWith('Finish(')) {
-        // Extract message from finish(message="...")
         const messageMatch = response.match(/finish\(message\s*=\s*["'](.*)["']\)/i);
         if (messageMatch) {
-          return {
-            _metadata: 'finish',
-            message: messageMatch[1],
-          };
+          return { _metadata: 'finish', message: messageMatch[1] };
         }
-        // Fallback: extract everything after "message="
         const fallbackMatch = response.match(/message\s*=\s*["']?([^"')]+)/i);
-        return {
-          _metadata: 'finish',
-          message: fallbackMatch ? fallbackMatch[1] : response,
-        };
+        return { _metadata: 'finish', message: fallbackMatch ? fallbackMatch[1] : response };
       }
 
-      // Unknown format
       throw new Error(`Failed to parse action: ${response}`);
     } catch (error) {
       throw new Error(`Failed to parse action: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-
-  /**
-   * Convert relative coordinates (0-1000) to absolute pixels.
-   * Based on Python handler.py: _convert_relative_to_absolute
-   */
-  private convertRelativeToAbsolute(element: number[], screen_width: number, screen_height: number): [number, number] {
-    const x = Math.round(element[0] / 1000 * screen_width);
-    const y = Math.round(element[1] / 1000 * screen_height);
-    return [x, y];
-  }
-
-  /**
-   * Execute action using ADB
-   * Based on Python handler.py: ActionHandler.execute
-   */
-  private async executeAction(action: any, deviceId: string | undefined, width: number, height: number): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const adbPrefix = deviceId ? ['-s', deviceId] : [];
-    const action_type = action["_metadata"];
-
-    // Handle finish action
-    if (action_type === "finish") {
-      return { success: true, shouldFinish: true, message: action["message"] };
-    }
-
-    // Unknown action type
-    if (action_type !== "do") {
-      return { success: false, shouldFinish: true, message: `Unknown action type: ${action_type}` };
-    }
-
-    const action_name = action.action;
-
-    try {
-      switch (action_name) {
-        case 'Launch':
-          return await this._handleLaunch(action, adbPrefix);
-
-        case 'Tap':
-          return await this._handleTap(action, adbPrefix, width, height);
-
-        case 'Type':
-        case 'Type_Name':
-          return await this._handleType(action, adbPrefix);
-
-        case 'Swipe':
-          return await this._handleSwipe(action, adbPrefix, width, height);
-
-        case 'Back':
-          return await this._handleBack(adbPrefix);
-
-        case 'Home':
-          return await this._handleHome(adbPrefix);
-
-        case 'Double Tap':
-          return await this._handleDoubleTap(action, adbPrefix, width, height);
-
-        case 'Long Press':
-          return await this._handleLongPress(action, adbPrefix, width, height);
-
-        case 'Wait':
-          return await this._handleWait(action);
-
-        case 'Take_over':
-          return await this._handleTakeover(action);
-
-        case 'Note':
-          return await this._handleNote(action);
-
-        case 'Call_API':
-          return await this._handleCallApi(action);
-
-        case 'Interact':
-          return await this._handleInteract(action);
-
-        default:
-          return { success: false, message: `Unknown action: ${action_name}` };
-      }
-    } catch (error) {
-      return { success: false, message: error instanceof Error ? error.message : String(error) };
-    }
-  }
-
-  /**
-   * Handle app launch action
-   * Based on Python handler.py: _handle_launch
-   */
-  private async _handleLaunch(action: any, adbPrefix: string[]): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const app_name = action["app"];
-    if (!app_name) {
-      return { success: false, shouldFinish: false, message: "No app name specified" };
-    }
-
-    const _package = APP_PACKAGES[app_name as keyof typeof APP_PACKAGES];
-    if (!_package) {
-      return { success: false, shouldFinish: false, message: `App not found: ${app_name}` };
-    }
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell monkey -p ${_package} -c android.intent.category.LAUNCHER 1`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle tap action
-   * Based on Python handler.py: _handle_tap
-   */
-  private async _handleTap(action: any, adbPrefix: string[], width: number, height: number): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const element = action["element"];
-    if (!element || !Array.isArray(element) || element.length < 2) {
-      return { success: false, shouldFinish: false, message: "No element coordinates" };
-    }
-
-    // Convert relative coordinates (0-1000) to absolute pixels
-    const [x, y] = this.convertRelativeToAbsolute(element, width, height);
-
-    // Check for sensitive operation (message parameter)
-    if ("message" in action) {
-      // In a real implementation, you would call a confirmation callback here
-      // For now, we'll proceed with the action
-      console.log(`Sensitive operation: ${action.message}`);
-    }
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input tap ${x} ${y}`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle text input action
-   * Based on Python handler.py: _handle_type
-   */
-  private async _handleType(action: any, adbPrefix: string[]): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const text = action["text"] || "";
-
-    const { stdout, stderr } = await execAsync(`adb ${adbPrefix.join(' ')} shell settings get secure default_input_method`);
-    const current_ime = (stdout + stderr).trim();
-
-    if (!current_ime.includes("com.android.adbkeyboard/.AdbIME")) {
-      await execAsync(`adb ${adbPrefix.join(' ')} shell ime set com.android.adbkeyboard/.AdbIME`);
-    }
-
-
-
-
-    // const encoded_text = Buffer.from("", 'utf-8').toString('base64')
-
-    // await execAsync(`adb ${adbPrefix.join(' ')} shell am broadcast -a ADB_INPUT_B64 --es msg ${encoded_text}`);
-    await execAsync('sleep 0.1');
-
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell am broadcast -a ADB_CLEAR_TEXT`);
-    await execAsync('sleep 0.1');
-
-
-    const type_encoded_text = Buffer.from(text, 'utf-8').toString('base64')
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell am broadcast -a ADB_INPUT_B64 --es msg ${type_encoded_text}`);
-    await execAsync('sleep 0.1');
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell ime set ${current_ime}`);
-    await execAsync('sleep 0.1');
-
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle swipe action
-   * Based on Python handler.py: _handle_swipe
-   */
-  private async _handleSwipe(action: any, adbPrefix: string[], width: number, height: number): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const start = action["start"];
-    const end = action["end"];
-
-    if (!start || !end || !Array.isArray(start) || !Array.isArray(end) || start.length < 2 || end.length < 2) {
-      return { success: false, shouldFinish: false, message: "Missing swipe coordinates" };
-    }
-
-    // Convert relative coordinates (0-1000) to absolute pixels
-    const [start_x, start_y] = this.convertRelativeToAbsolute(start, width, height);
-    const [end_x, end_y] = this.convertRelativeToAbsolute(end, width, height);
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input swipe ${start_x} ${start_y} ${end_x} ${end_y}`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle back button action
-   * Based on Python handler.py: _handle_back
-   */
-  private async _handleBack(adbPrefix: string[]): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input keyevent KEYCODE_BACK`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle home button action
-   * Based on Python handler.py: _handle_home
-   */
-  private async _handleHome(adbPrefix: string[]): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input keyevent KEYCODE_HOME`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle double tap action
-   * Based on Python handler.py: _handle_double_tap
-   */
-  private async _handleDoubleTap(action: any, adbPrefix: string[], width: number, height: number): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const element = action["element"];
-    if (!element || !Array.isArray(element) || element.length < 2) {
-      return { success: false, shouldFinish: false, message: "No element coordinates" };
-    }
-
-    // Convert relative coordinates (0-1000) to absolute pixels
-    const [x, y] = this.convertRelativeToAbsolute(element, width, height);
-
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input tap ${x} ${y}`);
-    await execAsync('sleep 0.1');
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input tap ${x} ${y}`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle long press action
-   * Based on Python handler.py: _handle_long_press
-   */
-  private async _handleLongPress(action: any, adbPrefix: string[], width: number, height: number): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const element = action["element"];
-    if (!element || !Array.isArray(element) || element.length < 2) {
-      return { success: false, shouldFinish: false, message: "No element coordinates" };
-    }
-
-    // Convert relative coordinates (0-1000) to absolute pixels
-    const [x, y] = this.convertRelativeToAbsolute(element, width, height);
-
-    // Long press is implemented as a swipe with same start and end coordinates
-    await execAsync(`adb ${adbPrefix.join(' ')} shell input swipe ${x} ${y} ${x} ${y} 500`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle wait action
-   * Based on Python handler.py: _handle_wait
-   */
-  private async _handleWait(action: any): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const duration_str = action["duration"] || "1 seconds";
-    let duration = 1.0;
-
-    try {
-      duration = parseFloat(duration_str.replace("seconds", "").replace("second", "").trim());
-      if (isNaN(duration)) {
-        duration = 1.0;
-      }
-    } catch {
-      duration = 1.0;
-    }
-
-    await execAsync(`sleep ${duration}`);
-    return { success: true, shouldFinish: false };
-  }
-
-  /**
-   * Handle takeover request (login, captcha, etc.)
-   * Based on Python handler.py: _handle_takeover
-   */
-  private async _handleTakeover(action: any): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    const message = action["message"] || "User intervention required";
-    // In a real implementation, you would call a takeover callback here
-    console.log(`Takeover: ${message}`);
-    return { success: true, shouldFinish: false, message };
-  }
-
-  /**
-   * Handle note action (placeholder for content recording)
-   * Based on Python handler.py: _handle_note
-   */
-  private async _handleNote(action: any): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    // This action is typically used for recording page content
-    // Implementation depends on specific requirements
-    return { success: true, shouldFinish: false, message: action.message };
-  }
-
-  /**
-   * Handle API call action (placeholder for summarization)
-   * Based on Python handler.py: _handle_call_api
-   */
-  private async _handleCallApi(action: any): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    // This action is typically used for content summarization
-    // Implementation depends on specific requirements
-    return { success: true, shouldFinish: false, message: action.instruction };
-  }
-
-  /**
-   * Handle interaction request (user choice needed)
-   * Based on Python handler.py: _handle_interact
-   */
-  private async _handleInteract(action: any): Promise<{ success: boolean; shouldFinish?: boolean; message?: string }> {
-    // This action signals that user input is needed
-    return { success: true, shouldFinish: false, message: "User interaction required" };
-  }
 }
-
-
