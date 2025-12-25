@@ -12,6 +12,37 @@ This MCP server provides tools for interacting with the AutoGLM-Phone API, which
 - **Execute Actions**: Execute single or batch actions on connected devices
 - **List Actions**: View all available action types with descriptions
 - **Device Info**: Query connected device information
+- **Multiple Transports**: Support stdio, HTTP, and SSE transport modes
+
+## Import StreamableHttp
+```
+{
+  "mcpServers": {
+    "autoglm-mcp": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "<ZUIPU_API_KEY>"
+      }
+    }
+  }
+}
+```
+## Import Studio
+```
+{
+  "mcpServers": {
+    "autoglm-mcp": {
+      "command": "npx",
+      "args": ["-y", "autoglm-mcp"], 
+      "env": {
+        "Authorization": "<ZUIPU_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+
 
 ## Installation
 
@@ -28,6 +59,8 @@ export AUTOGLM_API_KEY="your-api-key-here"
 export AUTOGLM_API_URL="https://open.bigmodel.cn/api/paas/v4"  # optional
 export AUTOGLM_MODEL="autoglm-phone"  # optional
 ```
+
+Or create a `.env` file based on `.env.example`.
 
 ## Usage
 
@@ -46,8 +79,27 @@ npm run build
 ### Production
 
 ```bash
+# stdio mode (default)
 npm start
+
+# HTTP mode
+node dist/index.js --transport http --port 3000
+
+# SSE mode
+node dist/index.js --transport sse --port 3000
+
+# HTTP mode on all interfaces
+node dist/index.js --transport http --host 0.0.0.0 --port 3000
 ```
+
+### Command Line Options
+
+| Option | Alias | Description | Default |
+|--------|-------|-------------|---------|
+| `--transport` | `-t` | Transport type: `stdio`, `http`, or `sse` | `stdio` |
+| `--port` | `-p` | Port for HTTP/SSE transport | `3000` |
+| `--host` | `-h` | Host for HTTP/SSE transport | `127.0.0.1` |
+| `--help` | | Show help message | |
 
 ## Available Tools
 
@@ -139,18 +191,34 @@ All coordinates use a 0-1000 scale relative to screen size:
 ```
 autoglm-mcp-server/
 ├── src/
-│   ├── index.ts              # Main server entry point
-│   ├── constants.ts          # Configuration constants
-│   ├── types.ts              # TypeScript type definitions
+│   ├── index.ts                    # Main server entry point
+│   ├── constants.ts                # Configuration constants
+│   ├── types.ts                    # TypeScript type definitions
 │   ├── tools/
-│   │   └── autoglm-tools.ts  # MCP tool implementations
+│   │   └── autoglm-tools.ts        # MCP tool implementations
 │   ├── services/
-│   │   └── autoglm-client.ts # AutoGLM API client
+│   │   ├── autoglm-api-client.ts   # AutoGLM API client
+│   │   ├── autoglm-client.ts       # AutoGLM client wrapper
+│   │   └── adb-service.ts          # ADB device service
 │   └── schemas/
-│       └── index.ts          # Zod validation schemas
+│       └── index.ts                # Zod validation schemas
+├── dist/                           # Compiled output
 ├── package.json
 ├── tsconfig.json
+├── .env.example
 └── README.md
+```
+
+## HTTP/SSE Authentication
+
+When using HTTP or SSE transport, you can pass the API key via the `Authorization` header:
+
+```bash
+# Bearer token format
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize",...}'
 ```
 
 ## References
