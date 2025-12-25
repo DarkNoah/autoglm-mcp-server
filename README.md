@@ -4,15 +4,7 @@ A Model Context Protocol (MCP) server for the AutoGLM-Phone API, enabling automa
 
 ## Overview
 
-This MCP server provides tools for interacting with the AutoGLM-Phone API, which allows AI models to control mobile devices through a series of actions. The server supports Android (ADB)
-
-## Features
-
-- **Get Actions**: Convert natural language instructions into executable device actions
-- **Execute Actions**: Execute single or batch actions on connected devices
-- **List Actions**: View all available action types with descriptions
-- **Device Info**: Query connected device information
-- **Multiple Transports**: Support stdio, HTTP, and SSE transport modes
+This MCP server provides tools for interacting with the AutoGLM-Phone API, which allows AI models to control mobile devices through a series of actions. The server supports Android (ADB).
 
 ## Quick Start
 
@@ -131,65 +123,50 @@ node dist/index.js --transport http --host 0.0.0.0 --port 3000
 
 ## Available Tools
 
-### autoglm_get_actions
+### autoglm_list_adb_devices
 
-Get a sequence of actions from AutoGLM based on a natural language instruction and optional screen image.
+List all Android devices connected via ADB (Android Debug Bridge).
 
 **Parameters:**
-- `instruction` (string): Natural language instruction
-- `screen_image` (string, optional): Base64 encoded or URL of screen image
-- `response_format` ('markdown' | 'json'): Output format
+- `response_format` ('markdown' | 'json', optional): Output format
+
+**Returns:**
+- Device ID, status, connection type, model, Android version, screen dimensions
+
+**Example:**
+```json
+{}
+```
+
+### autoglm_task
+
+Execute a task on a connected device using AutoGLM online model. The model will iteratively capture screenshots, analyze the screen, and execute actions until the task is complete.
+
+**Parameters:**
+- `prompt` (string, required): Natural language task description (1-5000 characters)
+- `device_id` (string, optional): Target ADB device ID
+- `max_steps` (number, optional): Maximum steps to execute (default: 100, range: 1-200)
+- `lang` ('cn' | 'en', optional): Language for responses (default: 'cn')
+
+**How it works:**
+1. Captures the current screen via ADB
+2. Sends the screen image and task prompt to AutoGLM online model
+3. The model analyzes the screen and decides on the next action
+4. Executes the action via ADB
+5. Repeats until the task is complete or max_steps is reached
 
 **Example:**
 ```json
 {
-  "instruction": "Open WeChat and send a message to Mom",
-  "response_format": "json"
+  "prompt": "Open WeChat and send a message to Mom saying hello",
+  "max_steps": 50,
+  "lang": "cn"
 }
 ```
-
-### autoglm_execute_action
-
-Execute a single AutoGLM action on a connected device.
-
-**Parameters:**
-- `action_type` (string): The type of action to execute
-- `parameters` (object, optional): Action-specific parameters
-- `device_id` (string, optional): Target device ID
-
-**Example:**
-```json
-{
-  "action_type": "Tap",
-  "parameters": {"x": 500, "y": 800}
-}
-```
-
-### autoglm_batch_execute_actions
-
-Execute multiple AutoGLM actions in sequence.
-
-**Parameters:**
-- `actions` (array): Array of actions to execute
-- `device_id` (string, optional): Target device ID
-- `stop_on_error` (boolean): Whether to stop if an action fails
-
-### autoglm_list_actions
-
-List all available AutoGLM action types with descriptions.
-
-**Parameters:**
-- `response_format` ('markdown' | 'json'): Output format
-
-### autoglm_get_device_info
-
-Get information about connected mobile devices.
-
-**Parameters:**
-- `device_id` (string, optional): Device ID to query
-- `response_format` ('markdown' | 'json'): Output format
 
 ## Supported Actions
+
+The AutoGLM model can execute the following actions:
 
 | Action | Description | Parameters |
 |--------|-------------|------------|
