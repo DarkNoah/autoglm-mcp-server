@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server for the AutoGLM-Phone API, enabling automa
 
 ## Overview
 
-This MCP server provides tools for interacting with the AutoGLM-Phone API, which allows AI models to control mobile devices through a series of actions. The server supports Android (ADB), HarmonyOS (HDC), and iOS devices.
+This MCP server provides tools for interacting with the AutoGLM-Phone API, which allows AI models to control mobile devices through a series of actions. The server supports Android (ADB)
 
 ## Features
 
@@ -14,40 +14,68 @@ This MCP server provides tools for interacting with the AutoGLM-Phone API, which
 - **Device Info**: Query connected device information
 - **Multiple Transports**: Support stdio, HTTP, and SSE transport modes
 
-## Import StreamableHttp
-```
-{
-  "mcpServers": {
-    "autoglm-mcp": {
-      "url": "http://127.0.0.1:3000/mcp",
-      "headers": {
-        "Authorization": "<ZUIPU_API_KEY>"
-      }
-    }
-  }
-}
-```
-## Import Studio
-```
-{
-  "mcpServers": {
-    "autoglm-mcp": {
-      "command": "npx",
-      "args": ["-y", "autoglm-mcp"], 
-      "env": {
-        "Authorization": "<ZUIPU_API_KEY>"
-      }
-    }
-  }
-}
-```
+## Quick Start
 
-
-
-## Installation
+### Using npx (Recommended)
 
 ```bash
-npm install
+# Run directly without installation
+npx -y autoglm-mcp-server
+
+# With options
+npx -y autoglm-mcp-server --transport http --port 3000
+```
+
+### Global Installation
+
+```bash
+npm install -g autoglm-mcp-server
+autoglm-mcp-server
+```
+
+### Local Installation
+
+```bash
+npm install autoglm-mcp-server
+```
+
+## MCP Client Configuration
+
+### Claude Desktop / Cursor (stdio mode)
+
+```json
+{
+  "mcpServers": {
+    "autoglm": {
+      "command": "npx",
+      "args": ["-y", "autoglm-mcp-server"],
+      "env": {
+        "AUTOGLM_API_KEY": "<YOUR_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+### StreamableHTTP Mode
+
+First start the server:
+```bash
+npx -y autoglm-mcp-server --transport http --port 3000
+```
+
+Then configure your MCP client:
+```json
+{
+  "mcpServers": {
+    "autoglm": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "<YOUR_API_KEY>"
+      }
+    }
+  }
+}
 ```
 
 ## Configuration

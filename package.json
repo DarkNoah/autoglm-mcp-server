@@ -4,11 +4,38 @@
   "description": "MCP server for AutoGLM-Phone API integration",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "autoglm-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "autoglm",
+    "model-context-protocol",
+    "mobile-automation",
+    "adb",
+    "zhipu",
+    "glm"
+  ],
+  "author": "DarkNoah",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DarkNoah/autoglm-mcp-server.git"
+  },
+  "homepage": "https://github.com/DarkNoah/autoglm-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/DarkNoah/autoglm-mcp-server/issues"
+  },
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=18"
