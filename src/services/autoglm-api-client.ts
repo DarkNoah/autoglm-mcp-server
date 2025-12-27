@@ -267,6 +267,7 @@ REMEMBER:
         })),
         max_tokens: 3000,
         temperature: 0.0,
+        stream:false,
       }),
     });
 
@@ -274,6 +275,7 @@ REMEMBER:
       const errorText = await response.text();
       throw new Error(`AutoGLM API error: ${response.status} - ${errorText}`);
     }
+
 
     const data = await response.json() as any;
     return data.choices[0]?.message?.content || '';
