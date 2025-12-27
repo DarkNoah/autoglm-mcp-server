@@ -15,6 +15,7 @@ import {
   ListActionsInputSchema,
   GetDeviceInfoInputSchema,
   ListADBDevicesInputSchema,
+  ADBConnectInputSchema,
   TaskInputSchema,
   ResponseFormat
 } from '../schemas/index.js';
@@ -27,6 +28,49 @@ const adbService = new ADBService();
  */
 export function registerAutoGLMTools(server: McpServer): void {
 
+
+  // Tool: ADB Connect
+  server.registerTool(
+    'adb_connect',
+    {
+      title: 'ADB Connect to Device',
+      description: `Connect to an Android device via ADB over network.
+
+This tool connects to an Android device using its IP address and port number.
+The device must have ADB over TCP/IP enabled.
+
+Args:
+  - address (string): Device address in format IP:PORT (e.g., 192.168.10.20:5555)
+
+Examples:
+  - address: "192.168.10.20:5555"
+  - address: "10.0.0.100:5555"
+
+Prerequisites:
+  - The target device must have ADB debugging enabled
+  - The device must have TCP/IP mode enabled (adb tcpip 5555)
+  - The device must be reachable on the network`,
+      inputSchema: ADBConnectInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true
+      }
+    },
+    async (params) => {
+      const result = await adbService.connect(params.address);
+      return {
+        content: [{
+          type: 'text',
+          text: result.success
+            ? `✅ Successfully connected to ${params.address}\n${result.message}`
+            : `❌ Failed to connect to ${params.address}\n${result.message}`
+        }],
+        structuredContent: result
+      };
+    }
+  );
 
   // Tool: List ADB Devices
   server.registerTool(

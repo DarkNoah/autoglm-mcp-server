@@ -107,6 +107,16 @@ export const ListADBDevicesInputSchema = z.object({}).strict();
 
 export type ListADBDevicesInput = z.infer<typeof ListADBDevicesInputSchema>;
 
+// ADB Connect Schema
+export const ADBConnectInputSchema = z.object({
+  address: z.string()
+    .min(1, 'Address is required')
+    .regex(/^[\d.]+:\d+$/, 'Address must be in format IP:PORT (e.g., 192.168.10.20:5555)')
+    .describe('Device address in format IP:PORT (e.g., 192.168.10.20:5555)')
+}).strict();
+
+export type ADBConnectInput = z.infer<typeof ADBConnectInputSchema>;
+
 // Task Schema
 export const TaskInputSchema = z.object({
   device_id: z.string().optional()

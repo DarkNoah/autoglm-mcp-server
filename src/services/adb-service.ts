@@ -64,6 +64,19 @@ export class ADBService {
   }
 
   /**
+   * Connect to a device via IP and port
+   */
+  async connect(address: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const output = await this.execCommand(['connect', address]);
+      const success = output.includes('connected') || output.includes('already connected');
+      return { success, message: output.trim() };
+    } catch (error: any) {
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
    * List all connected devices
    */
   async listDevices(): Promise<DeviceInfo[]> {
