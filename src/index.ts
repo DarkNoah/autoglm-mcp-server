@@ -19,7 +19,13 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { registerAutoGLMTools } from "./tools/autoglm-tools.js";
 import express from "express";
 import { randomUUID } from "node:crypto";
-import type { Request, Response } from 'express';
+import { createRequire } from "node:module";
+import type { Response } from 'express';
+
+// 读取 package.json 获取版本号（兼容 npx 等各种运行方式）
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json");
+const VERSION: string = packageJson.version;
 
 
 
@@ -30,7 +36,7 @@ function createServer(): McpServer {
   const server = new McpServer(
     {
       name: "autoglm-mcp-server",
-      version: "1.0.0",
+      version: VERSION,
       description: "MCP server for AutoGLM-Phone API integration",
     },
     {
